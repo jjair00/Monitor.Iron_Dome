@@ -1,34 +1,18 @@
-import sys
-import argparse
-import time
-import logging
-import os, math, re
+import argparse, time, logging, os, psutil, magic, hashlib,threading, signal, sys, subprocess
 from daemonize import Daemonize
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import psutil
-import time
-import magic
 import numpy as np
-import hashlib
-import threading
+import datetime
 
-pid = "/Users/jcueto-r/Desktop/IronDome/irondome.pid"
-# files_hash = {}
-# files_entropy = {}
-# files_type = {}
-# files_creation_date = {}
+pid = "/home/jcueto-r/irondome.pid"
+
 files = []
-objects = {}
-
-        #     entropia_anterior = getattr(self, 'entropia_anterior', None)
-        #     entropia_actual = calcular_entropia(ruta_archivo)
-        #     self.entropia_anterior = entropia_actual
-        #     if entropia_anterior is not None:
-        #         if entropia_actual > entropia_anterior:
-        #             logging.warning(f'Aumento en la entropía detectado en el archivo: {ruta_archivo} con un cambio en la entropía de: {entropia_anterior} a {entropia_actual}.')
-        #         elif entropia_actual < entropia_anterior:
-        #             logging.warning(f'Disminución en la entropía detectado en el archivo: {ruta_archivo} con un cambio en la entropía de: {entropia_anterior} a {entropia_actual}.')
+objects = []
+counter_event = 0
+oldpercent_DU = 50
+counter_Cripto = 0
+counter_flag = 0
 
 class Archivo:
     def __init__(self, path, hash, entropy, filetype, creationdate, newhash=None, newentropy=None, newfiletype=None, newcreationdate=None):
@@ -41,93 +25,124 @@ class Archivo:
         self.newentropy = newentropy
         self.newfiletype = newfiletype
         self.newcreationdate = newcreationdate
-    
-    def __str__(self):
-        return f"Archivo: {self.path}, Hash: {self.hash}, Entropy: {self.entropy}, Filetype: {self.filetype}, Creation Date: {self.creationdate}, New Hash: {self.newhash}, New Entropy: {self.newentropy}, New Filetype: {self.newfiletype}, New Creation Date: {self.newcreationdate}"
 
-def starter(ruta, extensiones):
-    print("HOLA STARTER")
-    path_walk(ruta, extensiones)
-    crear_objetos_archivos(files)
-    calculate_hash(files)
-    # for obj in objects:
-    #     print(obj.hash)
-    # print(objects.hash)
-    # print()
-    # started_entropy(files_entropy)
-    # get_modified_date(ruta)
-    
-    # print(files_hash)
-    # print(files_entropy)
-    # print(files_type)
-    # print(files_creation_date)
-    # print(files)
-    # print(Archivo
+def crear_objetos_archivos(file):
+    hash = calculate_hash(file)
+    entropy = calculate_entropy(file)
+    creation_date = get_modified_date(file)
+    i = Archivo(file,hash,entropy[0],entropy[1],creation_date,None,None,None,None)
+    objects.append(i)
 
-def crear_objetos_archivos(files):
-    hash1 = "Jasd878fdh78d"
+def evitar_duplicados():
+    path_walk(ruta_critica, extensiones)
     for file in files:
-        i = file
-        i = Archivo(i,None,None,None,None,None,None,None,None)
-        # print(i)
+        obj_paths = [obj.path for obj in objects]
+        try:
+            if file not in obj_paths:
+                crear_objetos_archivos(file)
+        except FileNotFoundError:
+            print("Archivo no encontrado")
 
+def comprobar_objetos(object):
+    for obj in object:
+        global counter_flag, counter_Cripto
+        try:
+            new_hash = calculate_hash(obj.path)
+            new_entropy = calculate_entropy(obj.path)
+            new_creation_date = get_modified_date(obj.path)
+        except FileNotFoundError:
+            files.remove(obj.path)
+            objects.remove(obj)
+        try:
+            obj.newhash = new_hash
+            obj.newentropy = new_entropy[0]
+            if obj.entropy == None or obj.newentropy == None:
+                obj.entropy = 0
+                obj.newentropy = 0
+            obj.newfiletype = new_entropy[1]
+            obj.newcreationdate = new_creation_date
+        except TypeError:
+            pass
+        if not extensiones or os.path.splitext(obj.path)[1] in extensiones:
+            if obj.hash != obj.newhash:
+                logging.info(f'<Path: {obj.path}, el hash ha cambiado de {obj.hash} a {obj.newhash}>')
+                obj.hash = obj.newhash
+                counter_flag += 1
+            if obj.entropy != obj.newentropy:
+                logging.info(f'<Path: {obj.path}, la entropia ha cambiado de {obj.entropy} a {obj.newentropy}>')
+                obj.entropy = obj.newentropy
+                counter_flag += 1
+            if obj.filetype != obj.newfiletype:
+                logging.info(f'<Path: {obj.path}, el tipo de archivo ha cambiado de {obj.filetype} a {obj.newfiletype}>')
+                obj.filetype = obj.newfiletype
+                counter_flag += 1
+            if obj.creationdate != obj.newcreationdate:
+                logging.info(f'<Path: {obj.path}, la fecha de creacion ha cambiado de {obj.creationdate} a {obj.newcreationdate}>')
+                obj.creationdate = obj.newcreationdate
+                counter_flag += 1
+            if counter_flag > 2:
+                logging.warning(f"Posible actividad criptográfica")
+                counter_Cripto += 1
+                t0 = datetime.datetime.now()    
+                crypto_activity(t0)
+            counter_flag = 0
+
+def crypto_activity(t0):
+    t1 = datetime.datetime.now()
+    td = t1 - t0
+    global counter_flag, counter_Cripto
+    if counter_Cripto >= 3 and td < datetime.timedelta(seconds=1):
+        i = 0
+        while i < 5:
+            logging.critical(f"Se ha detectado el uso intensivo de actividad criptográfica")
+            i += 1
+        counter_Cripto = 0
+    
 def path_walk(ruta, extensiones):
-    print("HOLA PATH_WALK")
     for dirpath, dirnames, filenames in os.walk(ruta):
         for filename in filenames:
             if len(extensiones) == 0:
                 file_path = os.path.join(dirpath, filename)
-                files.append(file_path)
-                # files_hash[file_path] = None
-                # files_entropy[file_path] = None
-                # files_creation_date[file_path] = None
+                if file_path not in files:
+                    files.append(file_path)
             elif len(extensiones) >= 1:
+                file_path = os.path.join(dirpath, filename)
                 for a in extensiones:
                     if filename.endswith(a):
-                        file_path = os.path.join(dirpath, filename)
-                        files.append(file_path)
-                        # files_hash[file_path] = None
-                        # files_entropy[file_path] = None
-                        # files_creation_date[file_path] = None
+                         if file_path not in files:
+                            files.append(file_path)
 
-def calculate_hash(files):
-    print("HOLA CALCULATE_HASH")
-    for i in files:
-        hash_obj = hashlib.md5()
-        try:
-            with open(i, 'rb') as f:
-                for bloque in iter(lambda: f.read(4096), b''):
-                    hash_obj.update(bloque)
-        except (FileNotFoundError, PermissionError, OSError):
-            continue
-        # objects[i] = hash_obj.hexdigest()
-        # objects[i].hash = hash_obj.hexdigest()
-        # i.hash = hash_obj.hexdigest()
-
-def started_entropy(files_entropy):
-    print("HOLA STARTED_ENTROPY")
-    for file in files_entropy:
-        file_type = magic.from_file(file, mime=True)
+def calculate_hash(file):
+    hash_obj = hashlib.md5()
+    try:
         with open(file, 'rb') as f:
-            content = f.read()
+            for bloque in iter(lambda: f.read(4096), b''):
+                hash_obj.update(bloque)
+    except (FileNotFoundError, PermissionError, OSError):
+        print("No se puede obtener el hash")
+    hash = hash_obj.hexdigest()
+    return hash
+
+def calculate_entropy(file_path):
+    try:
+        file_type = magic.from_file(file_path, mime=True)
+        with open(file_path, 'rb') as file:
+            content = file.read()
             byte_counts = np.bincount(np.frombuffer(content, dtype=np.uint8))
             probabilities = byte_counts / len(content)
             probabilities = np.where(np.isclose(probabilities, 0), 1e-10, probabilities)  # Reemplazar valores cercanos a cero
-            
-            files_entropy[file] =  -np.sum(probabilities * np.log2(probabilities))
-            files_type[file] = file_type
+            entropy = -np.sum(probabilities * np.log2(probabilities))
+        return  entropy, file_type
+    except (IsADirectoryError, FileNotFoundError):
+        pass
 
-def get_modified_date(ruta):
-    print("HOLA GET_MODIFIED_DATE")
-    for i in files_creation_date:
-        timestamp = os.path.getmtime(i)
-        fecha_creacion = time.ctime(timestamp)
-        files_creation_date[i] = fecha_creacion
+def get_modified_date(file):
+    command = ['stat', '-c', '%w', file]
+    result = subprocess.run(command, capture_output=True, text=True)
+    fecha_creacion = result.stdout.strip()
+    return fecha_creacion
 
 def monitorizar_ruta(ruta):
-    print("HOLA MONITORIZAR_RUTA")
-    # time.sleep(4)
-    # print("Hola monitorizar")
     event_handler = MyHandler()
     observer = Observer()
     observer.schedule(event_handler, ruta, recursive=True)
@@ -140,186 +155,174 @@ def monitorizar_ruta(ruta):
     observer.join()
 
 def config_logger():
-    print("HOLA CONFIG_LOGGER")
-    logging.basicConfig(filename='/Users/jcueto-r/Desktop/IronDome/irondome.log', level=logging.DEBUG, format='%(process)d - %(asctime)s - %(levelname)s - %(message)s - %(name)s')
-
-
-# def calcular_entropia(ruta):
-#     print("HOLA CALCULAR_ENTROPIA")
-#     with open(ruta, 'rb') as archivo:
-#         datos = archivo.read()
-#     tamano = len(datos)
-#     contador = {}
-#     for byte in datos:
-#         if byte not in contador:
-#             contador[byte] = 0
-#         contador[byte] += 1
-#     entropia = 0
-#     for count in contador.values():
-#         probabilidad = count / tamano
-#         entropia -= probabilidad * math.log2(probabilidad)
-#     return entropia
-
-def detectar_actividad_criptografica(ruta_archivo):
-    print("HOLA DETECTAR_ACTV_CRIPTOGRAFICA")
-    with open(ruta_archivo, 'r') as archivo:
-        contenido = archivo.read()
-    # Ejemplo de detección de actividad criptográfica basado en patrones
-    patrones_aes = [
-    r'\bAES\b',
-    r'\bAdvanced Encryption Standard\b',
-    r'\bRijndael\b',
-    r'\b128-bit\b',
-    r'\b256-bit\b',
-    ]
-    patrones_3des = [
-    r'\b3DES\b',
-    r'\bTriple DES\b',
-    r'\bTDEA\b',
-    r'\b168-bit\b',
-    ]
-    patrones_rsa = [
-    r'\bRSA\b',
-    r'\bRivest-Shamir-Adleman\b',
-    r'\bPKCS#1\b',
-    r'\b2048-bit\b',
-    r'\b4096-bit\b',
-    ]
-    patrones_fernet = [
-    r'gAAAAA',  # Encabezado de un archivo Fernet cifrado
-    # r'=',    # Fin de un archivo Fernet cifrado
-    r'Fernet\.[A-Za-z0-9_-]{43}',              # Cadena de texto en formato de clave Fernet
-    r'\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{22}'  # Patrón de cadena de texto cifrada con Fernet
-    ]
-
-    # Detección de actividad criptográfica basada en patrones
-    actividad_criptografica = []
-    for patron in patrones_aes:
-        if re.search(patron, contenido, re.IGNORECASE):
-            actividad_criptografica.append('AES')
-            break
-    for patron in patrones_3des:
-        if re.search(patron, contenido, re.IGNORECASE):
-            actividad_criptografica.append('3DES')
-            break
-    for patron in patrones_rsa:
-        if re.search(patron, contenido, re.IGNORECASE):
-            actividad_criptografica.append('RSA')
-            break
-    for patron in patrones_fernet:
-        if re.search(patron, contenido, re.IGNORECASE):
-            actividad_criptografica.append('FERNET')
-            break
-    if actividad_criptografica:
-        logging.warning(f'Detectada actividad criptográfica en el archivo5: {ruta_archivo}')
+    # logging.basicConfig(filename='/Users/jcueto-r/Desktop/irondome-' + str(datetime.datetime.now()) + '.log', level=logging.DEBUG, format='%(process)d - %(asctime)s - %(levelname)s - %(message)s - %(name)s')
+    logging.basicConfig(filename='/var/log/irondome/irondome-' + str(datetime.datetime.now()) + '.log', level=logging.INFO, format='%(process)d - %(asctime)s - %(levelname)s - %(message)s - %(name)s')
+    logging.basicConfig(filename='/var/log/irondome/irondome-' + str(datetime.datetime.now()) + '.log', level=logging.WARNING, format='%(process)d - %(asctime)s - %(levelname)s - %(message)s - %(name)s')
 
 def comprobacion_memoria():
-    print("HOLA COMPROBACION MEMORIA")
     mem = psutil.Process().memory_info().rss
     pid = os.getpid()
     logging.info(f'Memoria en uso: {format(mem/1024/1024, ".2f")} MB')
-    if mem > 300 * 1024 * 1024:
-        logging.warning(f'Memoria en uso: {format(mem/1024/1024, ".2f")} MB. Se ha excedido la memoria en uso permitida de 100 MB')
-        os.kill(pid,9)
-
-
-
-
-def calculate_entropy(file_path):
-    print("HOLA CALCULATE_ENTROPY")
-    file_type = magic.from_file(file_path, mime=True)
-    with open(file_path, 'rb') as file:
-        content = file.read()
-        byte_counts = np.bincount(np.frombuffer(content, dtype=np.uint8))
-        probabilities = byte_counts / len(content)
-        probabilities = np.where(np.isclose(probabilities, 0), 1e-10, probabilities)  # Reemplazar valores cercanos a cero
-        entropy = -np.sum(probabilities * np.log2(probabilities))      
-    return file_type, entropy
+    if mem > 100000000:
+        logging.warning(f'Se ha excedido la memoria en uso permitida de 100 MB. Se procede a suspender el proceso.')
+        # os.kill(pid, signal.SIGSTOP) # Suspendes proceso, recuperar con fg
+        # os.kill(pid, 9)
+        os.kill(pid, signal.SIGCONT) # Continuas despues de parar
 
 def check_disk_usage(ruta):
-    print("Hola CHECK_DISK_USAGE")
-    disk_usage = psutil.disk_usage(ruta)
-    print(disk_usage)
-    # if disk in ['disk0', 'disk2']:
-    #     read_count = stats.read_count
-    #     write_count = stats.write_count
-    #     read_bytes = stats.read_bytes
-    #     write_bytes = stats.write_bytes
-    #     read_time = stats.read_time
-    #     write_time = stats.write_time
-    #     print(f"Estadísticas de disco {disk}:")
-    #     print(f"Lecturas: {read_count}")
-    #     print(f"Escrituras: {write_count}")
-    #     print(f"Bytes leídos: {read_bytes}")
-    #     print(f"Bytes escritos: {write_bytes}")
-    #     print(f"Tiempo de lectura: {read_time}")
-    #     print(f"Tiempo de escritura: {write_time}")
-    # print(disk_usage)
+    try:
+        disk_usage = psutil.disk_usage(ruta)
+        percent_DU = disk_usage.percent
+        logging.info(f'El uso de disco está al: {percent_DU:.2f} %')
+        if percent_DU - oldpercent_DU >= 20:
+            logging.warning(f'Se detecta abusos en la lectura de disco')
+        else:
+            pass
+    except FileNotFoundError:
+        pass
 
-    if disk_usage is None:
-        logging.warning(f'No se encontró la ruta: {ruta}')
-        return
-    total_reads = disk_usage['disk0'][2] / 1024 / 1024
-    total_operations = disk_usage['disk0'][0] + disk_usage['disk0'][1] / 1024 / 1024
-    percent = (total_reads / total_operations) * 100
-    if percent > 90:
-        logging.warning(f'El uso del disco es muy alto: {percent:.2f} %')
-    elif percent > 50:
-        logging.warning(f'El uso del disco es alto: {percent:.2f} %')
-    elif percent > 20:
-        logging.warning(f'El uso del disco es medio: {percent:.2f} %')
-    elif percent > 2:
-        logging.warning(f'El uso del disco es bajo: {percent:.2f} %')
-    elif total_operations > 0:
-        logging.warning('No se han realizado operaciones de lectura en disco.')
+def leer_registros_criptoapi():
+    try:
+        # Comando para leer los registros del sistema
+        if sys.platform == "darwin":
+            # macOS
+            comando = "log show --predicate 'eventMessage CONTAINS \"CriptoAPI\"' --style syslog --info"
+        if sys.platform.startswith("linux"):
+            # Linux (Debian, Ubuntu, etc.)
+            comando = "journalctl --no-pager -q -o cat --grep=\"CriptoAPI\""
+        else:
+            print("El sistema operativo no es compatible.")
+            return []
+        # Ejecutar el comando y capturar la salida
+        salida = subprocess.check_output(comando, shell=True, universal_newlines=True)
+        # Procesar la salida de los registros y buscar eventos relacionados con la CriptoAPI
+        eventos_criptoapi = buscar_eventos_criptoapi(salida)
+        # Retornar los eventos encontrados
+        logging.warning(f'Se han encontrado los siguientes registros del uso de alguna CriptoApi {eventos_criptoapi}')
+        return eventos_criptoapi
+    except subprocess.CalledProcessError:
+        print("Error al leer los registros del sistema.")
+        return []
     
+def buscar_eventos_criptoapi(registros):
+    # Implementa aquí la lógica para buscar eventos relacionados con la CriptoAPI en los registros
+    # Puedes utilizar expresiones regulares, cadenas de búsqueda, o cualquier otro método que se adapte a tus necesidades y al formato de los registros
+    eventos = []
+    # Ejemplo: buscar eventos que contengan la cadena "CriptoAPI"
+    for registro in registros.splitlines():
+        if "CriptoAPI" in registro:
+            eventos.append(registro)
+    return eventos
 
 
 class MyHandler(FileSystemEventHandler):
-    print("HOLA CLASE MYHANDLER")
-    def on_any_event(self, event):
-        print("HOLA ON_ANY_EVENT")
-        print(event)
-        ruta_archivo = event.src_path
-        config_logger()
-        comprobacion_memoria()
-        check_disk_usage(ruta_archivo)
-        if os.path.exists(ruta_archivo) and os.path.isfile(ruta_archivo):
-            file_type, entropy = calculate_entropy(ruta_archivo)
-            logging.info(f'<Path: {ruta_archivo}, File type: {file_type}, Entropy: {entropy}>')
+    def __init__(self):
+        super().__init__()
+        self.processed_events = set()
+        path_walk(ruta_critica, extensiones)
+        for file in files:
+            crear_objetos_archivos(file)
+        # logging.info((f"__________________________ Evento número: {counter_event} ______________________"))
+        # comprobacion_memoria()
+        # check_disk_usage(ruta_critica)
+
+
+    def on_created(self, event):
+        if not extensiones or os.path.splitext(event.src_path)[1] in extensiones:
+            global counter_event
+            # if event in self.processed_events:
+            #     return
+            # self.processed_events.add(event)
+            # self.path = event.src_path
+            counter_event += 1
+            logging.info((f"__________________________ Evento número: {counter_event} ______________________"))
+            comprobacion_memoria()
+            check_disk_usage(ruta_critica)
+            logging.info(f'Se ha creado el archivo: {event.src_path} ')
+            evitar_duplicados()
+            matching_objects = [obj for obj in objects if obj.path == event.src_path]
+            comprobar_objetos(matching_objects)
+            leer_registros_criptoapi()
+
+            return super().on_created(event) 
+    
+    def on_moved(self, event):
+        if not extensiones or os.path.splitext(event.src_path)[1] in extensiones:
+            global counter_event
+            # if event in self.processed_events:
+            #     return
+            # self.processed_events.add(event)
+            # self.path = event.src_path
+            counter_event += 1
+            logging.info((f"__________________________ Evento número: {counter_event} ______________________"))
+            comprobacion_memoria()
+            check_disk_usage(ruta_critica)
+            evitar_duplicados()
+            logging.info(f'Se ha movido/renombrado el archivo: {event.src_path} al archivo {event.dest_path} ')
+            matching_objects = [obj for obj in objects if obj.path == event.src_path]
+            comprobar_objetos(matching_objects)
+            leer_registros_criptoapi()
+        
+            return super().on_moved(event)
+    
+    def on_deleted(self, event):
+        if not extensiones or os.path.splitext(event.src_path)[1] in extensiones:
+            global counter_event
+            # if event in self.processed_events:
+            #     return
+            # self.processed_events.add(event)
+            # self.path = event.src_path    
+            counter_event += 1
+            logging.info((f"__________________________ Evento número: {counter_event} ______________________"))
+            comprobacion_memoria()
+            check_disk_usage(ruta_critica)
+            logging.info(f'Se ha eliminado el archivo: {event.src_path} ')
+            matching_objects = [obj for obj in objects if obj.path == event.src_path]
+            comprobar_objetos(matching_objects)
+            leer_registros_criptoapi()
+
+            return super().on_deleted(event)
+    
+    def on_modified(self, event):
+        if not extensiones or os.path.splitext(event.src_path)[1] in extensiones:
+            global counter_event
+            # if event in self.processed_events:
+            #     return
+            # self.processed_events.add(event)
+            # self.path = event.src_path
+            counter_event += 1
+            if event.is_directory == False:
+                logging.info((f"__________________________ Evento número: {counter_event} ______________________"))
+                comprobacion_memoria()
+                check_disk_usage(ruta_critica)
+                logging.info(f'Se ha modificado el archivo: {event.src_path}')
+            evitar_duplicados()
+            matching_objects = [obj for obj in objects if obj.path == event.src_path]
+            comprobar_objetos(matching_objects)
+            leer_registros_criptoapi()
+
+            return super().on_modified(event)
 
 def main():
-    print("HOLA MAIN")
-    # t0 = time.time()
-    parser = argparse.ArgumentParser(description='Programa irondome')
-    parser.add_argument('-m', nargs='*', type=str)
-    args = parser.parse_args()
-    ruta_critica = args.m[0]
-    extensiones = args.m[1:]
-    # if os.geteuid() != 0:
-    #     print("Error: Irondome must be run as root.")
-    #     sys.exit(1)
-
-    # h1 = threading.Thread(name="hilo_1", target=starter, args=(ruta_critica, extensiones, ))
+    config_logger()
     h2 = threading.Thread(name="hilo_2", target=monitorizar_ruta, args=(ruta_critica,))
-    starter(ruta_critica, extensiones)
-    check_disk_usage(ruta_critica)
-    # monitorizar_ruta(ruta_critica)
-    
-    # h1.start()
     h2.start()
-    # h1.join()
-    # h2.join()
-
-    print("Hola desde el hilo principal")
-    # tf = time.time()
-    # td = tf - t0
-    # print(td)
-
+        
 
 if __name__ == "__main__":
-    main()
+    if os.geteuid() != 0:
+        print("Error: Irondome must be run as root.")
+        sys.exit(1)
+    try:
+        parser = argparse.ArgumentParser(description='Programa irondome')
+        parser.add_argument('-m', nargs='*', type=str)
+        args = parser.parse_args()
+        ruta_critica = args.m[0]
+        extensiones = args.m[1:]
+    except Exception:
+        print("Error: Consultar -h or --help")
+        exit()
+    # main()
+    daemon = Daemonize(app="irondome_analyzer", pid=pid, action=main)
+    daemon.start()
     
-    #daemon = Daemonize(app="irondome_analyzer", pid=pid, action=main)
-    #daemon.start()
-
